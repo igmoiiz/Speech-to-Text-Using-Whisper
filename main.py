@@ -1,68 +1,120 @@
 import whisper
 import sounddevice as sd
 import numpy as np
-import time
 import torch
+import time
+import collections
+import webrtcvad
 
-# Configuration for the model
-MODEL_SIZE="medium"
-SAMPLE_RATE=16000
-CHUNK_DURATION=5
-SILENCE_THRESHOLD=0.01
-LANGUAGE="en"
+# ── Config ─────────────────────────────────────────────
+MODEL_SIZE         = "medium"
+SAMPLE_RATE        = 16000      # webrtcvad requires 16kHz
+CHANNELS           = 1
+VAD_AGGRESSIVENESS = 2          # 0=least aggressive, 3=most aggressive
+FRAME_DURATION_MS  = 30         # 10, 20, or 30ms (webrtcvad requirement)
+PADDING_DURATION_MS = 1200      # how long to wait after speech stops (ms)
+MIN_SPEECH_DURATION = 0.5       # ignore sounds shorter than this (seconds)
+LANGUAGE           = None
+
+# ── Load Model ─────────────────────────────────────────
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
-
-# Load the model
 print(f"Loading Whisper {MODEL_SIZE} model....")
 model = whisper.load_model(MODEL_SIZE, device=device)
-print("\nModel Loaded Successfully! Listening for speech....")
+print("Model Loaded! Listening...\n")
 print("=" * 50)
-print("\nLive Transcription Started - Press Ctrl+C to stop....")
+print("  JARVIS MODE — Speak freely, I'm listening...")
 print("=" * 50 + "\n")
 
-# Check if audio has speech
-def has_speech(audio: np.ndarray) -> bool:
-    return np.abs(audio).mean() > SILENCE_THRESHOLD
+# ── Setup VAD ──────────────────────────────────────────
+vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
 
-# Transcribe a chunk of speech audio
+# Frame size in samples
+FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION_MS / 1000)
+
+# How many frames fit in the padding window
+NUM_PADDING_FRAMES = int(PADDING_DURATION_MS / FRAME_DURATION_MS)
+
+# ── Transcribe ─────────────────────────────────────────
 def transcribe(audio: np.ndarray) -> str:
-    # Pass numpy array directly as tensor — no ffmpeg needed
     audio_tensor = torch.from_numpy(audio).float()
-    
     result = model.transcribe(
         audio_tensor,
         language=LANGUAGE,
-        fp16=(device == "cuda")  # fp16 only on GPU
+        fp16=(device == "cuda"),
     )
-    
-    return result['text'].strip() # Returning the transcribed text
+    return result["text"].strip()
 
-# Main Function
+# ── VAD Stream ─────────────────────────────────────────
+def is_speech(frame: np.ndarray) -> bool:
+    # Convert float32 → int16 PCM bytes for webrtcvad
+    pcm = (frame * 32767).astype(np.int16).tobytes()
+    try:
+        return vad.is_speech(pcm, SAMPLE_RATE)
+    except:
+        return False
+
+# ── Main Loop ──────────────────────────────────────────
+print("Waiting for you to speak...\n")
+
 try:
     while True:
-        # Record a Chunk of speech audio
-        audio = sd.rec(
-            int(CHUNK_DURATION * SAMPLE_RATE),
-            samplerate = SAMPLE_RATE,
-            channels = 1,
-            dtype = 'float32'
-        )
-        
-        sd.wait()   # Wait until the speech audio chunk is recorded
-        
-        audio_flat = audio.flatten()    # Converting the muti-dimentional audio array to 1-D Audio array
-        
-        # Skipping the silent chunks for performance
-        if not has_speech(audio_flat):
-            continue
-        
-        # Transcribe the speech audio chunk
-        text = transcribe(audio_flat)
-        
-        if text:
-            timestamp = time.strftime("%H:%M:%S")
-            print(f"[{timestamp}] {text}")
-            
+        # Ring buffer holds recent frames to catch speech start
+        ring_buffer = collections.deque(maxlen=NUM_PADDING_FRAMES)
+        triggered = False       # are we currently recording speech?
+        voiced_frames = []      # all frames of the current utterance
+
+        # Open audio stream
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="float32") as stream:
+            while True:
+                # Read one frame
+                frame, _ = stream.read(FRAME_SIZE)
+                frame_flat = frame.flatten()
+                speech = is_speech(frame_flat)
+
+                if not triggered:
+                    # Not recording yet — watch ring buffer for speech
+                    ring_buffer.append((frame_flat, speech))
+                    num_voiced = len([f for f, s in ring_buffer if s])
+
+                    # If >60% of ring buffer is speech → start recording
+                    if num_voiced > 0.6 * ring_buffer.maxlen:
+                        triggered = True
+                        print("🎤 Listening...", end="\r")
+                        # Include buffered frames so we don't miss the start
+                        voiced_frames.extend([f for f, _ in ring_buffer])
+                        ring_buffer.clear()
+                else:
+                    # Currently recording — collect frames
+                    voiced_frames.append(frame_flat)
+                    ring_buffer.append((frame_flat, speech))
+                    num_unvoiced = len([f for f, s in ring_buffer if not s])
+
+                    # If >90% of ring buffer is silence → stop recording
+                    if num_unvoiced > 0.90 * ring_buffer.maxlen:
+                        print("                    ", end="\r")  # clear indicator
+                        triggered = False
+
+                        # Build full audio array
+                        audio = np.concatenate(voiced_frames)
+
+                        # Ignore very short sounds (coughs, clicks etc)
+                        duration = len(audio) / SAMPLE_RATE
+                        if duration < MIN_SPEECH_DURATION:
+                            voiced_frames = []
+                            ring_buffer.clear()
+                            continue
+
+                        # Transcribe
+                        text = transcribe(audio)
+                        if text:
+                            timestamp = time.strftime("%H:%M:%S")
+                            print(f"[{timestamp}] {text}\n")
+
+                        # Reset for next utterance
+                        voiced_frames = []
+                        ring_buffer.clear()
+                        break  # restart outer loop for fresh stream
+
 except KeyboardInterrupt:
-    print("\n\nTranscription stopped. Bye!")
+    print("\n\nJarvis offline. Bye!")
