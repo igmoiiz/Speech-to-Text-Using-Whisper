@@ -1,0 +1,10 @@
+openai-whisper
+sounddevice
+numpy
+torch
+webrtcvad-wheels
+ollama
+edge-tts
+pygame
+ddgs
+
