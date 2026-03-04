@@ -38,34 +38,49 @@ def normalize_tool_call(text: str) -> str:
     Auto-correct common LLM tool call formatting mistakes.
     Converts any variation into: TOOL: tool_name(arg="value")
     """
-    # Pattern: OPEN_APP(WhatsApp) or open_app(WhatsApp) without TOOL: prefix
+    # If already properly formatted, return as-is
+    if re.search(r'TOOL:\s*\w+\(', text):
+        return text
+
     def fix_match(m):
         func = m.group(1).lower()
         args = m.group(2).strip().strip('"\'')
 
-        # Map common arg-less calls to correct format
         arg_map = {
-            "open_app":          f'app_name="{args}"',
-            "close_app":         f'app_name="{args}"',
-            "search_web":        f'query="{args}"',
-            "open_website":      f'url="{args}"',
-            "run_command":       f'command="{args}"',
-            "create_note":       f'title="{args}", content=""',
-            "read_note":         f'title="{args}"',
-            "delete_note":       f'title="{args}"',
-            "kill_process":      f'name="{args}"',
-            "install_package":   f'package="{args}"',
-            "run_python":        f'code="{args}"',
-            "remember_fact":     f'fact="{args}"',
-            "recall_memory":     f'query="{args}"',
+            "open_app":        f'app_name="{args}"',
+            "close_app":       f'app_name="{args}"',
+            "search_web":      f'query="{args}"',
+            "open_website":    f'url="{args}"',
+            "run_command":     f'command="{args}"',
+            "analyze_csv":     f'path="{args}"',
+            "read_csv":        f'path="{args}"',
+            "create_note":     f'title="{args}", content=""',
+            "read_note":       f'title="{args}"',
+            "delete_note":     f'title="{args}"',
+            "kill_process":    f'name="{args}"',
+            "install_package": f'package="{args}"',
+            "run_python":      f'code="{args}"',
+            "remember_fact":   f'fact="{args}"',
+            "recall_memory":   f'query="{args}"',
         }
 
-        formatted_args = arg_map.get(func, f'"{args}"') if args else ""
+        # If args already contain = sign they're already formatted
+        if "=" in args:
+            return f'TOOL: {func}({args})'
+
+        formatted_args = arg_map.get(func, f'query="{args}"') if args else ""
         return f'TOOL: {func}({formatted_args})'
 
-    # Fix UPPERCASE_FUNC(arg) or lowercase_func(arg) missing TOOL: prefix
+    # Fix UPPERCASE_FUNC(args) — e.g. ANALYZE_CSV(...)
     text = re.sub(
-        r'(?<!TOOL:\s{0,10})\b([A-Z_]{3,}|[a-z_]{3,})\(([^)]*)\)',
+        r'\b([A-Z][A-Z_]{2,})\(([^)]*)\)',
+        fix_match,
+        text
+    )
+
+    # Fix lowercase_func(args) missing TOOL: prefix — e.g. analyze_csv(...)
+    text = re.sub(
+        r'(?<![:\w])([a-z][a-z_]{2,})\(([^)]*)\)',
         fix_match,
         text
     )
