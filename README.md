@@ -1,395 +1,144 @@
-Jarvis Voice Assistant
-======================
+# 🎙️ Jarvis: The Agentic Voice Assistant
 
-Jarvis is a local, privacy‑focused, real‑time **voice AI assistant** built in Python.  
-It listens through your microphone, detects when you speak, transcribes speech with Whisper, optionally performs web search, generates answers using an Ollama LLM, and replies back using neural text‑to‑speech — all in a continuous, hands‑free loop.
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
+[![Models](https://img.shields.io/badge/models-Whisper%20%7C%20Qwen2.5-orange.svg)](https://ollama.com)
 
----
+Jarvis is a high-performance, **local-first**, and privacy-focused **Agentic Voice AI Assistant**. Unlike traditional voice commands that follow rigid scripts, Jarvis utilizes a Large Language Model (LLM) "brain" to understand intent, manage complex conversation history, and execute a suite of over 40 specialized tools.
 
-Features
---------
-
-- **Hands‑free voice assistant loop**
-  - Always‑on listening with smart voice activity detection (VAD)
-  - Auto‑starts with a spoken greeting: “Jarvis online. How can I help?”
-- **High‑quality speech recognition**
-  - Uses OpenAI Whisper (`medium` model by default) for accurate transcription
-  - GPU acceleration when CUDA is available; otherwise CPU
-- **Local LLM via Ollama**
-  - Uses `qwen2.5:7b` (configurable) through Ollama’s `chat` API
-  - Maintains short conversation history for contextual responses
-- **Smart web search integration**
-  - DuckDuckGo Search (`ddgs`) used when queries sound like “search”, “what is…”, “latest news”, etc.
-  - Web results are passed as context to the LLM
-- **Streaming TTS response**
-  - Uses Microsoft Edge TTS (`edge_tts`)
-  - Streams LLM output sentence‑by‑sentence to speech (minimal gaps)
-  - Audio playback via `pygame`
-- **Clean conversation management**
-  - System prompt defines Jarvis’s persona and style
-  - Conversation history truncated to keep performance stable
-- **Graceful shutdown**
-  - Voice exit commands: `"goodbye jarvis"`, `"shut down"`, `"exit"`, `"turn off"`
-  - KeyboardInterrupt (`Ctrl+C`) safely stops the assistant
+Whether you need to analyze a financial spreadsheet via voice, search the web for the latest global events, or automate system tasks, Jarvis acts as a bridge between natural language and your machine's power.
 
 ---
 
-System Architecture
--------------------
+## 🌟 Capabilities at a Glance
 
-### High‑Level Data Flow
+- **🧠 Cognitive Reasoning**: Powered by Ollama (`qwen2.5` or `llama3.1`), Jarvis reasoning isn't limited to a list of commands. It understands context, sarcasm, and complex multi-part requests.
+- **👂 Triple-Trigger Activation**: 
+  - **Wake Word**: High-accuracy detection for "Hey Jarvis".
+  - **Acoustic Signature**: Detects **double claps** for hands-free wake-up in environments where speaking isn't ideal.
+  - **Dynamic VAD**: Uses WebRTC to distinguish between human speech and background noise.
+- **📼 Semantic & Episodic Memory**: 
+  - **Long-Term Facts**: Learns your name, preferences, and work details automatically.
+  - **Conversation Recall**: Remembers what you discussed earlier in the day or week.
+- **📊 Professional Data Suite**: 
+  - **Voice-to-Spreadsheet**: "Jarvis, what's the average revenue in that sales CSV?"—It uses Pandas to analyze data on the fly.
+  - **Notes Management**: Create, append, and search through a local knowledge base of text notes.
+- **🌐 Real-Time Intelligence**: Integrates DuckDuckGo for live web searches, fetching webpage content, and providing concise summaries.
+- **🔊 High-Fidelity Synthesis**: Streams audio via Microsoft Edge's neural voices for a human-like, low-latency response.
+
+---
+
+## 🏗️ Technical Architecture
+
+### 🔄 The Agentic Loop
+
+Jarvis doesn't just "reply." It enters a "Thought-Action-Observation" loop.
 
 ```mermaid
-flowchart LR
-    User((User)) -->|Speaks| Mic[Microphone Input]
-    Mic --> SD[sounddevice Stream]
-    SD --> VAD[WebRTC VAD\n(webrtcvad)]
-    VAD -->|Speech segment| STT[Whisper STT\n(whisper)]
-    STT -->|Transcript| ROUTER{Should\nSearch?}
-    ROUTER -->|Yes| SEARCH[Web Search\n(DDGS)]
-    SEARCH --> CONTEXT[Augment User\nMessage]
-    ROUTER -->|No| CONTEXT
-    CONTEXT --> CHAT[LLM via Ollama\n(qwen2.5:7b)]
-    CHAT -->|Token Stream| SPLIT[Sentence Splitter\n(regex)]
-    SPLIT --> TTSQ[Async TTS Queue\n(edge_tts)]
-    TTSQ --> TTS[MP3 Files]
-    TTS --> PYGAME[Audio Playback\n(pygame.mixer)]
-    PYGAME -->|Voice Reply| User
-```
-
-### Runtime Components
-
-```mermaid
-flowchart TB
-    subgraph Audio_In[Audio Input & VAD]
-        A1[sounddevice InputStream] --> A2[frame loop]
-        A2 --> A3[is_speech()\n(webrtcvad)]
-        A3 --> A4[ring_buffer + voiced_frames]
-        A4 --> A5[Return speech audio\nnumpy array]
+flowchart TD
+    subgraph Input_Stream [Input Stream]
+        User((User)) -->|Voice| Mic[Mic Input]
+        Mic --> VAD{VAD/Wake Word}
     end
 
-    subgraph STT[Speech-to-Text]
-        S1[transcribe(audio)] --> S2[whisper.load_model]\nmedium
+    subgraph Cognitive_Engine [Cognitive Engine]
+        VAD -->|Segments| STT[Whisper STT]
+        STT -->|Transcript| LLM[LLM Brain]
+        
+        LLM -->|Tool Call| Tools[Multi-Tool Engine]
+        Tools -->|Execution Result| LLM
+        
+        LLM -.->|Periodic Sync| Mem[(Long-term Memory)]
     end
 
-    subgraph Logic[Assistant Logic]
-        L1[should_search(text)] --> L2[web_search(query)\nDDGS]
-        L3[conversation_history]
+    subgraph Output_Stream [Output Stream]
+        LLM -->|Sentence Stream| TTS[Edge TTS]
+        TTS -->|Neural Audio| Play[Pygame Mixer]
+        Play --> User
     end
 
-    subgraph LLM_TTS[LLM & Streaming TTS]
-        P1[respond_streaming()] --> P2[Producer: ollama.chat(stream=True)]
-        P2 --> P3[split_sentences()]
-        P3 --> P4[generate_tts(text)\nedge_tts]
-        P4 --> Q1[Async Queue]
-        Q1 --> C1[Consumer: play_audio()\npygame.mixer]
-    end
-```
-
-### Interaction Sequence
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant SD as sounddevice
-    participant VAD as VAD & listen()
-    participant STT as Whisper STT
-    participant LOGIC as Router & Web Search
-    participant LLM as Ollama LLM
-    participant TTS as edge_tts
-    participant PYG as pygame
-
-    U->>SD: Speaks into microphone
-    SD->>VAD: Audio frames
-    VAD->>VAD: Detect speech start/end
-    VAD-->>STT: Speech segment (numpy array)
-    STT-->>LOGIC: Transcribed text
-    LOGIC->>LOGIC: should_search()
-    alt Needs web search
-        LOGIC->>LOGIC: web_search() via DDGS
-    end
-    LOGIC-->>LLM: conversation_history + user message (+ web results)
-    LLM-->>LLM: Stream tokens
-    loop While tokens arrive
-        LLM-->>TTS: Sentence chunks
-        TTS-->>PYG: MP3 files
-        PYG-->>U: Audio playback
-    end
-    U-->>VAD: Exit phrase (optional)
+    style Cognitive_Engine fill:#f9f,stroke:#333,stroke-width:2px
 ```
 
 ---
 
-Project Structure
------------------
+## 📂 System Philosophy & Structure
 
-- `main.py` – Entire Jarvis assistant implementation:
-  - Configuration and constants
-  - Model loading (Whisper, Ollama, VAD, TTS, audio)
-  - Web search integration
-  - Streaming LLM + TTS pipeline
-  - Voice listening loop and shutdown logic
+Jarvis is designed with a "One File, One Responsibility" modular approach:
 
----
-
-Requirements
-------------
-
-- **OS**: Windows 10 (tested; other platforms likely possible with adjustments)
-- **Python**: 3.10+ recommended
-- **Hardware**:
-  - Working microphone
-  - Speakers/headphones
-  - Optional: NVIDIA GPU with CUDA for faster Whisper inference
-- **Runtime dependencies (Python packages)**:
-  - `whisper`
-  - `sounddevice`
-  - `numpy`
-  - `torch`
-  - `webrtcvad`
-  - `ollama` (Python client)
-  - `edge-tts`
-  - `pygame`
-  - `ddgs`
-- **System dependencies**:
-  - **FFmpeg** (required by Whisper/audio processing)
-  - **Ollama** installed and running locally
-  - Internet connection (for first model downloads, web search, Edge TTS)
-
-You can capture these in a `requirements.txt` similar to:
-
-```text
-openai-whisper
-sounddevice
-numpy
-torch
-webrtcvad-wheels
-ollama
-edge-tts
-pygame
-ddgs
-```
-
-> Adjust package names/versions as needed for your environment.
+- **`main.py`**: The central nervous system that coordinates the startup, pre-warming of models, and the primary active/idle switching logic.
+- **`config.py`**: The single source of truth for all parameters—from microphone sample rates to the LLM's system personality.
+- **`core/`**: The "Senses." Specialized drivers for audio capture (`listen.py`), transcription (`stt.py`), and speech synthesis (`tts.py`).
+- **`agent/`**: The "Mind." Handles the agentic loop (`jarvis.py`), the RAG-based memory system (`memory.py`), and the extensive functional toolset (`tools.py`).
 
 ---
 
-Installation
-------------
+## ⚙️ Requirements & Prerequisites
 
-1. **Clone or download the project**
-   ```bash
-   git clone "<your-repo-url>.git"
-   cd "Project 3"
-   ```
+### 💻 Hardware Requirements
+*   **Audio**: A stable 16kHz microphone and speakers.
+*   **Compute**: 
+    *   *Minimum*: High-end CPU (8+ cores).
+    *   *Recommended*: NVIDIA GPU with CUDA (8GB+ VRAM) for real-time performance.
 
-2. **Create and activate a virtual environment (recommended)**
-   ```bash
-   python -m venv .venv
-   .venv\Scripts\activate
-   ```
-
-3. **Install Python dependencies**
-   ```bash
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
-   Or install packages manually using the list above.
-
-4. **Install FFmpeg**
-   - Download FFmpeg for Windows and add the `bin` folder to your `PATH`.
-   - Verify:
-     ```bash
-     ffmpeg -version
-     ```
-
-5. **Install and set up Ollama**
-   - Install from `https://ollama.com/` (GUI installer on Windows).
-   - After installation, pull the model used in this project:
-     ```bash
-     ollama pull qwen2.5:7b
-     ```
-   - Ensure the Ollama service is running (usually automatic after install).
+### 💿 Software Dependencies
+*   **Python 3.10+**
+*   **Ollama**: External service for hosting local models.
+*   **FFmpeg**: Critical for audio file handling and Whisper processing.
 
 ---
 
-Estimated Download & Setup Time
--------------------------------
+## 📦 Rapid Deployment
 
-Actual times depend on your internet speed and hardware, but rough estimates:
+1.  **Environment Setup**
+    ```powershell
+    git clone https://github.com/igmoiiz/Speech-to-Text-Using-Whisper.git
+    cd "Speech-to-Text-Using-Whisper"
+    python -m venv venv
+    .\venv\Scripts\activate
+    ```
 
-- **Python packages**: a few hundred MB total  
-  - 100 Mbps: ~1–3 minutes  
-  - 20 Mbps: ~5–10 minutes
-- **Whisper `medium` model**:
-  - Size: ~1.4 GB (downloaded automatically on first use)
-  - 100 Mbps: ~2–5 minutes  
-  - 20 Mbps: ~10–20 minutes
-- **Ollama model `qwen2.5:7b`**:
-  - Size (compressed model files): several GB (commonly 4–8+ GB)
-  - 100 Mbps: ~5–20 minutes  
-  - 20 Mbps: ~20–60+ minutes
-- **One‑time model compilation/warmup**:
-  - First inference on CPU or GPU can take additional time for cache building.
+2.  **Installing Libraries**
+    ```powershell
+    pip install -r requirements.txt
+    ```
 
-After first‑time downloads, subsequent runs are much faster since models are cached locally.
+3.  **Model Acquisition**
+    ```powershell
+    ollama pull qwen2.5:7b
+    ```
 
----
-
-Configuration
--------------
-
-Key configuration values are defined at the top of `main.py`:
-
-```python
-WHISPER_MODEL       = "medium"
-SAMPLE_RATE         = 16000
-CHANNELS            = 1
-VAD_AGGRESSIVENESS  = 2
-FRAME_DURATION_MS   = 30
-PADDING_DURATION_MS = 1200
-MIN_SPEECH_DURATION = 0.5
-LANGUAGE            = "en"
-
-OLLAMA_MODEL        = "qwen2.5:7b"
-TTS_VOICE           = "en-US-GuyNeural"
-TTS_RATE            = "+15%"
-```
-
-You can customize:
-
-- **Speech recognition**:
-  - `WHISPER_MODEL`: e.g. `"base"`, `"small"`, `"medium"`, `"large"` etc.
-  - `LANGUAGE`: change to your target language code.
-- **VAD behavior**:
-  - `VAD_AGGRESSIVENESS`: 0–3 (higher = more strict speech detection).
-  - `MIN_SPEECH_DURATION`, `FRAME_DURATION_MS`, `PADDING_DURATION_MS`.
-- **LLM model**:
-  - `OLLAMA_MODEL`: any model installed in Ollama (e.g., `llama3:8b`, etc.).
-- **TTS voice**:
-  - `TTS_VOICE`: any valid Edge TTS voice ID.
-  - `TTS_RATE`: speaking speed (e.g., `"+15%"`, `"-10%"`).
-
-Search trigger phrases and exit commands are also configurable via:
-
-```python
-SEARCH_TRIGGERS = [...]
-EXIT_COMMANDS   = [...]
-```
+4.  **Launch**
+    ```powershell
+    python main.py
+    ```
 
 ---
 
-How to Run & Use
-----------------
+## 🚦 Interaction Examples
 
-1. **Start Ollama (if not already running)**
-   - On Windows, Ollama usually starts automatically.
-   - Verify with:
-     ```bash
-     ollama list
-     ```
-
-2. **Run Jarvis**
-   ```bash
-   python main.py
-   ```
-
-3. **Observe startup**
-   - Console shows:
-     - Device detection (`cuda` or `cpu`)
-     - Whisper model loading
-     - Ollama pre‑warming
-   - Jarvis speaks: “Jarvis online. How can I help?”
-
-4. **Interact by voice**
-   - Speak naturally after you see:
-     ```text
-     Ready! Speak to Jarvis...
-     ```
-   - Jarvis will:
-     - Detect your speech using WebRTC VAD.
-     - Transcribe audio with Whisper.
-     - Optionally run web search (if your query matches search triggers).
-     - Stream a spoken answer back to you.
-
-5. **Example things to say**
-   - “What is the capital of France?”
-   - “Search for the latest news about AI today.”
-   - “Tell me about black holes.”
-   - “What’s the weather like today in New York?” (relies on web search results)
-
-6. **Exit the assistant**
-   - Say any of:
-     - “goodbye jarvis”
-     - “shut down”
-     - “exit”
-     - “turn off”
-   - Or press `Ctrl+C` in the terminal.
+*   **System Control**: *"Jarvis, take a screenshot of my work and set a reminder to finish it in 20 minutes."*
+*   **Data Analysis**: *"Analyze the CSV file in my Downloads folder and give me a summary of the 'Total Profit' column."*
+*   **Web Research**: *"Look up the latest price of Bitcoin and summarize the top three news articles from today."*
+*   **Personal Knowledge**: *"Remember that my client meeting is moved to Friday at 3 PM."* (Later: *"When is my meeting?"*)
 
 ---
 
-Future Enhancements
--------------------
+## 📜 License & Legal
 
-Some ideas to extend this project:
+This software is **Proprietary**. All rights are reserved by the author.
 
-- **GUI / Tray App**
-  - Simple desktop UI with mute/unmute, status indicators, and logs.
-- **Wake word detection**
-  - Replace always‑on VAD with a wake word like “Hey Jarvis”.
-- **Command plugins**
-  - Structured intents for actions like:
-    - Opening applications
-    - Controlling media (play/pause/volume)
-    - Managing files or automation scripts
-- **Multi‑language support**
-  - Automatic language detection and dynamic `LANGUAGE` switching.
-  - Per‑language TTS voices.
-- **Custom knowledge base**
-  - Local documents (PDFs, notes) indexed with embeddings.
-  - Hybrid web + local data retrieval.
-- **Better logging & analytics**
-  - Structured logs for queries, latencies, and error tracking.
-- **Hotkey activation**
-  - Global keyboard shortcut to toggle listening.
+**Copyright © 2026 Moiz Baloch**
+
+Unauthorized copying, distribution, or modification of this project is strictly prohibited without explicit written consent.
+
+**To obtain a license or request usage permissions, please contact:**
+- 📧 **Official Email**: moaiz3110@gmail.com
+- 💬 **WhatsApp**: [+92 306 7892235](https://wa.me/923067892235)
 
 ---
 
-License
--------
+## 👥 Acknowledgments & Credits
 
-Copyright © 2026  
-**Moiz Baloch**
-
-Permission is hereby granted, free of charge, to any person obtaining a copy  
-of this software and associated documentation files (the "Software"), to deal  
-in the Software without restriction, including without limitation the rights  
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell  
-copies of the Software, and to permit persons to whom the Software is  
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included  
-in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR  
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,  
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE  
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER  
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,  
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN  
-THE SOFTWARE.
-
----
-
-Credits
--------
-
-- **Project Author & Primary Developer**: **Moiz Baloch**
-- **Core technologies**:
-  - Whisper (speech‑to‑text)
-  - WebRTC VAD (`webrtcvad`)
-  - Ollama (`qwen2.5:7b` model by default)
-  - Microsoft Edge TTS (`edge-tts`)
-  - DuckDuckGo Search (`ddgs`)
-  - `sounddevice`, `pygame`, `torch`, and `numpy` for audio and ML foundations
-
+- **Project Visionary**: Moiz Baloch
+- **Underlying Technologies**: Developed using OpenAI Whisper (Open Source), Microsoft Edge-TTS, Ollama, and WebRTC VAD.
