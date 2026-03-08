@@ -17,7 +17,9 @@ def _load() -> dict:
     global _memory_cache, _last_load_time
     
     if not os.path.exists(MEMORY_FILE):
-        return {"facts": [], "episodes": [], "preferences": {}}
+        data = {"facts": [], "episodes": [], "preferences": {}}
+        _memory_cache = data
+        return data
     
     # Check if file has changed since last load
     try:
@@ -26,12 +28,20 @@ def _load() -> dict:
             return _memory_cache
             
         with open(MEMORY_FILE, "r") as f:
-            _memory_cache = json.load(f)
-            _last_load_time = mtime
-            return _memory_cache
+            data = json.load(f)
+            
+        # Ensure all required keys exist
+        for key in ["facts", "episodes", "preferences"]:
+            if key not in data:
+                data[key] = [] if key != "preferences" else {}
+                
+        _memory_cache = data
+        _last_load_time = mtime
+        return data
     except Exception as e:
         print(f"Memory load error: {e}")
         return {"facts": [], "episodes": [], "preferences": {}}
+
 
 def _save(data: dict):
     global _memory_cache, _last_load_time

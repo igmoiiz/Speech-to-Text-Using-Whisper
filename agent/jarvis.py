@@ -12,15 +12,23 @@ from core.tts import generate_tts, play_audio
 from agent.memory import (
     build_memory_context, remember, save_episode, recall
 )
-from agent.tools import TOOL_DESCRIPTIONS, execute_tool
+from agent.tools import (
+    TOOL_DESCRIPTIONS, execute_tool, 
+    get_datetime, get_battery
+)
 
 # Short term conversation history
 _conversation: list = []
 
 def _build_system_prompt() -> str:
-    """Build dynamic system prompt with memory context."""
+    """Build dynamic system prompt with memory and system context."""
     memory_ctx = build_memory_context()
+    sys_time   = get_datetime()
+    sys_status = get_battery()
+    
     prompt     = AGENT_SYSTEM_PROMPT + "\n\n" + TOOL_DESCRIPTIONS
+    prompt    += f"\n\n--- SYSTEM OBSERVATIONS ---\nTime: {sys_time}\nStatus: {sys_status}\n---"
+    
     if memory_ctx:
         prompt += f"\n\n--- YOUR MEMORY ---\n{memory_ctx}\n---"
     return prompt
@@ -62,6 +70,8 @@ def normalize_tool_call(text: str) -> str:
             "run_python":      f'code="{args}"',
             "remember_fact":   f'fact="{args}"',
             "recall_memory":   f'query="{args}"',
+            "play_music":      f'query="{args}"',
+            "play_on_spotify": f'query="{args}"',
         }
 
         # If args already contain = sign they're already formatted
@@ -131,6 +141,8 @@ def parse_tool_call(text: str):
                 "calculate":     "expression",
                 "fetch_webpage": "url",
                 "run_python":    "code",
+                "play_music":      "query",
+                "play_on_spotify": "query",
             }
             param = param_defaults.get(tool_name, "query")
             kwargs[param] = first_arg

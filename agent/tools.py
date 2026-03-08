@@ -65,7 +65,7 @@ except ImportError:
     PYWHATKIT_OK = False
 
 from config import NOTES_DIR
-from core.search import web_search as _web_search
+from core.search import web_search as _web_search, news_search as _news_search
 from agent.memory import remember, recall, forget, set_preference, get_preference
 
 os.makedirs(NOTES_DIR, exist_ok=True)
@@ -77,6 +77,26 @@ os.makedirs(NOTES_DIR, exist_ok=True)
 def search_web(query: str) -> str:
     """Search the web for current information."""
     return _web_search(query)
+
+def search_news(query: str) -> str:
+    """Search specifically for the latest news articles."""
+    return _news_search(query)
+
+def deep_search(query: str) -> str:
+    """Search the web and automatically fetch content from the most relevant link."""
+    raw_results = _web_search(query, max_results=3)
+    if "No relevant information" in raw_results:
+        return raw_results
+    
+    # Try to find the first URL in the results to 'read' it
+    match = re.search(r"URL: (https?://\S+)", raw_results)
+    if match:
+        top_url = match.group(1)
+        print(f"  🧠 Deep Diving into: {top_url}")
+        page_content = fetch_webpage(top_url)
+        return f"SEARCH SUMMARY:\n{raw_results}\n\nTOP SOURCE CONTENT ({top_url}):\n{page_content[:4000]}"
+    
+    return raw_results
 
 def open_website(url: str) -> str:
     """Open a URL in the default browser."""
@@ -940,6 +960,40 @@ def get_user_preference(key: str) -> str:
     return get_preference(key)
 
 # ══════════════════════════════════════════════════════
+#  MEDIA TOOLS
+# ══════════════════════════════════════════════════════
+
+def play_music(query: str) -> str:
+    """Play music or a specific song on YouTube."""
+    if PYWHATKIT_OK:
+        try:
+            # Short delay and run in thread to avoid blocking activation response
+            import threading
+            threading.Thread(target=lambda: pywhatkit.playonyt(query)).start()
+            return f"Playing '{query}' on YouTube, Sir."
+        except Exception as e:
+            return f"Failed to play music: {e}"
+    else:
+        url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+        webbrowser.open(url)
+        return f"Searching for '{query}' on YouTube for you, Sir."
+
+def play_on_spotify(query: str) -> str:
+    """Open Spotify desktop app and search for the song."""
+    try:
+        # This URI scheme opens the local desktop application if installed
+        import os
+        os.startfile(f"spotify:search:{urllib.parse.quote(query)}")
+        return f"Opening '{query}' on the Spotify desktop app for you, Sir."
+    except Exception:
+        # Fallback to web search if local app isn't found or URI fails
+        encoded = urllib.parse.quote(query)
+        url = f"https://open.spotify.com/search/{encoded}"
+        webbrowser.open(url)
+        return f"I've opened the Spotify web search for '{query}' for you, Sir."
+
+
+# ══════════════════════════════════════════════════════
 #  TOOL REGISTRY
 # ══════════════════════════════════════════════════════
 
@@ -1002,12 +1056,17 @@ TOOLS = {
     "forget_memory":     forget_memory,
     "save_preference":   save_preference,
     "get_preference":    get_user_preference,
+    "play_music":        play_music,
+    "play_on_spotify":   play_on_spotify,
+    "news_pulse":        search_news,
+    "deep_search":       deep_search,
 }
 
 TOOL_DESCRIPTIONS = """
-Available tools — call using: TOOL: tool_name(arg1="value1", arg2="value2")
+AVAILABLE TOOLS — call using: TOOL: tool_name(arg1="value1", arg2="value2")
 
-WEB: search_web(query) | open_website(url) | fetch_webpage(url) | summarize_url(url)
+WEB: search_web(query) | deep_search(query) | news_pulse(query) | open_website(url) 
+     fetch_webpage(url) | summarize_url(url)
 
 APPS: open_app(app_name) | close_app(app_name)
 
@@ -1031,6 +1090,8 @@ NOTES: create_note(title, content) | list_notes() | read_note(title) | append_no
 MESSAGING: send_whatsapp(phone, message) | whatsapp_web(phone, message)
            draft_email(to, subject, body) | share_via_browser(content, platform)
            send_telegram(message, bot_token, chat_id)
+
+MEDIA: play_music(query) | play_on_spotify(query)
 
 MATH: calculate(expression) | unit_convert(value, from_unit, to_unit)
 

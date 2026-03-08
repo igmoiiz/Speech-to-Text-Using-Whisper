@@ -10,6 +10,7 @@ from core.stt   import load_model as load_stt, transcribe
 from core.tts   import speak, generate_tts, play_audio, quit_mixer
 from core.listen import listen, idle_loop
 from agent.jarvis import get_response, reset_conversation
+from agent.tools import get_battery, get_datetime
 
 # ══════════════════════════════════════════════════════
 #  PRE-WARM OLLAMA
@@ -31,7 +32,10 @@ def prewarm_ollama():
 #  STARTUP
 # ══════════════════════════════════════════════════════
 async def startup():
-    path = await generate_tts("Jarvis online and standing by.")
+    # Diagnostic check for flavor
+    battery = get_battery()
+    msg = f"Systems initialized. {battery}. Jarvis online and standing by, Sir."
+    path = await generate_tts(msg)
     play_audio(path)
 
 # ══════════════════════════════════════════════════════
@@ -60,9 +64,9 @@ def main():
             activation = idle_loop()
 
             if activation == "clap":
-                speak("Yes sir, I'm listening.")
+                speak("At your service, Sir.")
             else:
-                speak("Good to hear you. What do you need?")
+                speak("Welcome back, Sir. How can I help?")
 
             print("\n🟢 Jarvis ACTIVE — Say 'Goodbye Jarvis' to sleep\n")
 
