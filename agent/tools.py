@@ -158,6 +158,26 @@ APP_MAP = {
     "geforce":         "shell:appsFolder\\NVIDIACorp.NVIDIAControlPanel_56jybvy8sckqj!NVIDIAControlPanel",
 }
 
+# ── App Cache ──────────────────────────────────────────
+APP_CACHE_FILE = "data/app_cache.json"
+_app_path_cache = {}
+
+def _load_app_cache():
+    global _app_path_cache
+    if os.path.exists(APP_CACHE_FILE):
+        try:
+            with open(APP_CACHE_FILE, "r") as f:
+                _app_path_cache = json.load(f)
+        except:
+            _app_path_cache = {}
+
+def _save_app_cache():
+    os.makedirs("data", exist_ok=True)
+    with open(APP_CACHE_FILE, "w") as f:
+        json.dump(_app_path_cache, f, indent=2)
+
+_load_app_cache()
+
 def open_app(app_name: str) -> str:
     """Open an application or website by name."""
     name  = app_name.lower().strip()
@@ -176,40 +196,50 @@ def open_app(app_name: str) -> str:
                 return f"Opened {app_name}."
             except Exception as e:
                 return f"Failed to open {app_name}: {e}"
-    else:
-        # Search common install locations automatically
-        search_paths = [
-            os.environ.get("PROGRAMFILES", "C:\\Program Files"),
-            os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"),
-            os.environ.get("LOCALAPPDATA", ""),
-            os.environ.get("APPDATA", ""),
-        ]
-
-        for base in search_paths:
-            if not base:
-                continue
-            for root, dirs, files in os.walk(base):
-                for file in files:
-                    if (app_name.lower() in file.lower()
-                            and file.endswith(".exe")):
-                        full_path = os.path.join(root, file)
-                        try:
-                            subprocess.Popen(f'"{full_path}"', shell=True)
-                            return f"Found and launched: {full_path}"
-                        except Exception as e:
-                            return f"Found but failed to launch: {e}"
-
-        # Last resort — try Windows search
+    
+    # Check cache first
+    if name in _app_path_cache and os.path.exists(_app_path_cache[name]):
         try:
-            subprocess.Popen(
-                f'explorer shell:appsFolder',
-                shell=True
-            )
-            # Try direct command
-            subprocess.Popen(app_name, shell=True)
-            return f"Attempted to launch {app_name}."
-        except Exception as e:
-            return f"Could not find or open {app_name}: {e}"
+            subprocess.Popen(f'"{_app_path_cache[name]}"', shell=True)
+            return f"Launched from cache: {_app_path_cache[name]}"
+        except:
+            pass
+
+    # Search common install locations automatically
+    search_paths = [
+        os.environ.get("PROGRAMFILES", "C:\\Program Files"),
+        os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"),
+        os.environ.get("LOCALAPPDATA", ""),
+        os.environ.get("APPDATA", ""),
+    ]
+
+    for base in search_paths:
+        if not base:
+            continue
+        for root, dirs, files in os.walk(base):
+            # Optimization: don't go too deep into system folders or installers
+            if any(x in root.lower() for x in ["$recycle.bin", "windows\\winsxs", "temp", "cache"]):
+                dirs[:] = [] # stop recursion
+                continue
+
+            for file in files:
+                if (name in file.lower() and file.endswith(".exe")):
+                    full_path = os.path.join(root, file)
+                    try:
+                        subprocess.Popen(f'"{full_path}"', shell=True)
+                        _app_path_cache[name] = full_path
+                        _save_app_cache()
+                        return f"Found and launched: {full_path}"
+                    except Exception as e:
+                        return f"Found but failed to launch: {e}"
+
+    # Last resort — try direct command
+    try:
+        subprocess.Popen(app_name, shell=True)
+        return f"Attempted to launch {app_name} via shell command."
+    except Exception as e:
+        return f"Could not find or open {app_name}: {e}"
+
 
 def close_app(app_name: str) -> str:
     """Close a running application."""
@@ -844,13 +874,25 @@ def send_telegram(message: str, bot_token: str = "", chat_id: str = "") -> str:
 def calculate(expression: str) -> str:
     """Safely evaluate a math expression."""
     try:
-        allowed = set("0123456789+-*/(). ")
-        if not all(c in allowed for c in expression):
-            return "Invalid characters in expression."
-        result = eval(expression)
+        # Clean expression
+        expr = expression.replace(" ", "").replace("^", "**").replace("x", "*")
+        
+        # Strict security check
+        if len(expr) > 100:
+            return "Expression too long."
+        
+        allowed = set("0123456789+-*/().%")
+        if not all(c in allowed for c in expr):
+            return "Invalid characters in expression. Only numbers and basic operators are allowed."
+        
+        # Using a restricted local context for eval is slightly safer
+        result = eval(expr, {"__builtins__": {}}, {})
         return f"{expression} = {result}"
+    except ZeroDivisionError:
+        return "Error: Division by zero."
     except Exception as e:
         return f"Calculation error: {e}"
+
 
 def unit_convert(value: float, from_unit: str, to_unit: str) -> str:
     """Convert between common units."""

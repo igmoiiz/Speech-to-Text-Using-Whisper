@@ -9,16 +9,39 @@ from config import MEMORY_FILE, MAX_MEMORY_ENTRIES, CONVERSATION_TURNS
 # ── Ensure data dir exists ─────────────────────────────
 os.makedirs(os.path.dirname(MEMORY_FILE), exist_ok=True)
 
-# ── Load / Save ────────────────────────────────────────
+# ── Global Cache ───────────────────────────────────────
+_memory_cache = None
+_last_load_time = 0
+
 def _load() -> dict:
+    global _memory_cache, _last_load_time
+    
     if not os.path.exists(MEMORY_FILE):
         return {"facts": [], "episodes": [], "preferences": {}}
-    with open(MEMORY_FILE, "r") as f:
-        return json.load(f)
+    
+    # Check if file has changed since last load
+    try:
+        mtime = os.path.getmtime(MEMORY_FILE)
+        if _memory_cache is not None and mtime <= _last_load_time:
+            return _memory_cache
+            
+        with open(MEMORY_FILE, "r") as f:
+            _memory_cache = json.load(f)
+            _last_load_time = mtime
+            return _memory_cache
+    except Exception as e:
+        print(f"Memory load error: {e}")
+        return {"facts": [], "episodes": [], "preferences": {}}
 
 def _save(data: dict):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    global _memory_cache, _last_load_time
+    try:
+        with open(MEMORY_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        _memory_cache = data
+        _last_load_time = time.time() # Update cache time to avoid immediate reload
+    except Exception as e:
+        print(f"Memory save error: {e}")
 
 # ── Remember a fact ────────────────────────────────────
 def remember(fact: str, category: str = "general") -> str:

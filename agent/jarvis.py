@@ -252,8 +252,12 @@ async def respond_streaming(user_text: str):
     loop       = asyncio.get_event_loop()
 
     def split_sentences(text: str) -> list:
-        parts = re.split(r'(?<=[.!?])\s+', text.strip())
+        # Avoid splitting on common abbreviations like Mr. Dr. etc.
+        # This prevents awkward pauses in the middle of sentences.
+        pattern = r'(?<!\bMr)(?<!\bDr)(?<!\bMs)(?<!\bMrs)(?<!\bSt)(?<!\bInc)(?<!\bLtd)(?<!\n)(?<=[.!?])\s+'
+        parts = re.split(pattern, text.strip(), flags=re.IGNORECASE)
         return [p.strip() for p in parts if p.strip()]
+
 
     # ── Tool execution loop ────────────────────────────
     async def run_with_tools() -> str:
