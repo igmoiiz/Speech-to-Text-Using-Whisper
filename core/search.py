@@ -6,62 +6,62 @@ from ddgs import DDGS
 
 def web_search(query: str, max_results: int = 5) -> str:
     """
-    Search the web for general info. 
+    Search the web for general info with multiple time-limit fallbacks. 
     Returns: Title | URL | Snippet
     """
     print(f"  🔍 Global Search: {query}")
     results_list = []
     
     # Attempt normal search then news-specific search for 'latest' queries
-    search_types = ["text", "news"] if any(x in query.lower() for x in ["latest", "news", "today", "current"]) else ["text"]
+    search_types = ["text", "news"] if any(x in query.lower() for x in ["latest", "news", "today", "current", "update"]) else ["text"]
 
     for stype in search_types:
         try:
             with DDGS() as ddgs:
-                if stype == "text":
-                    res = ddgs.text(query, max_results=max_results, timelimit="d")
-                else:
-                    res = ddgs.news(query, max_results=max_results, timelimit="d")
-                
-                for r in res:
-                    title   = r.get("title", "No Title")
-                    snippet = r.get("body", r.get("snippet", ""))
-                    link    = r.get("href", r.get("link", ""))
-                    results_list.append(f"TITLE: {title}\nURL: {link}\nCONTENT: {snippet}\n---")
+                # Try Day -> Week -> Month fallbacks for maximum relevance
+                for tlimit in ["d", "w", "m"]:
+                    if stype == "text":
+                        res = list(ddgs.text(query, max_results=max_results, timelimit=tlimit))
+                    else:
+                        res = list(ddgs.news(query, max_results=max_results, timelimit=tlimit))
                     
-            if results_list: break
+                    if res:
+                        for r in res:
+                            title   = r.get("title", "No Title")
+                            snippet = r.get("body", r.get("snippet", ""))
+                            link    = r.get("href", r.get("link", r.get("url", "")))
+                            results_list.append(f"TITLE: {title}\nURL: {link}\nCONTENT: {snippet}\n---")
+                        break # Found something, exit tlimit loop
+                        
+            if results_list: break # Found in this search type, exit stype loop
         except Exception as e:
             print(f"  Search ({stype}) encountered an issue: {e}")
             continue
 
-    if not results_list:
-        # Fallback to wider time limit
-        try:
-            with DDGS() as ddgs:
-                res = ddgs.text(query, max_results=max_results, timelimit="w")
-                for r in res:
-                    results_list.append(f"TITLE: {r['title']}\nURL: {r['href']}\nCONTENT: {r['body']}\n---")
-        except: pass
-
-    return "\n".join(results_list).strip() if results_list else "No relevant information found on the live web, Sir."
+    return "\n".join(results_list).strip() if results_list else "I've scanned the live web and found no concrete pinpoint data on that topic yet, Sir."
 
 def news_search(query: str, max_results: int = 5) -> str:
-    """Targeted search for latest news reports."""
+    """Targeted search for latest news reports with fallback."""
     print(f"  🗞️ News Pulse: {query}")
     try:
         with DDGS() as ddgs:
-            results = list(ddgs.news(query, max_results=max_results, timelimit="d"))
-            if not results:
-                results = list(ddgs.news(query, max_results=max_results, timelimit="w"))
+            results = []
+            for tlimit in ["d", "w", "m"]:
+                results = list(ddgs.news(query, max_results=max_results, timelimit=tlimit))
+                if results: break
             
+            if not results:
+                return "The current news cycles are quiet on that front, Sir."
+
             output = []
             for r in results:
                 title   = r.get("title", "No Title")
                 source  = r.get("source", "Unknown Source")
-                date    = r.get("date", "Today")
+                date    = r.get("date", "Recently")
                 url     = r.get("url", r.get("link", r.get("href", "#")))
                 output.append(f"SOURCE: {source} | {title} ({date})\nURL: {url}\n---")
             
             return "\n".join(output).strip()
     except Exception as e:
-        return f"News search failed: {e}"
+        return f"News pulse failed: {e}"
+

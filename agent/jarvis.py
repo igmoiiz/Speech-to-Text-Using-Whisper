@@ -288,13 +288,14 @@ async def respond_streaming(user_text: str):
                 messages=messages,
                 stream=True,
                 options={
-                    # Shorter after tool calls — just need confirmation
-                    "num_predict":    60 if tool_calls > 0 else 150,
-                    "temperature":    0.7,
-                    "top_p":          0.9,
-                    "repeat_penalty": 1.1,
+                    # Low temperature to reduce hallucinations/creativity in tool calling
+                    "num_predict":    100 if tool_calls > 0 else 200,
+                    "temperature":    0.2,
+                    "top_p":          0.8,
+                    "repeat_penalty": 1.2,
                 }
             )
+
 
             for chunk in stream:
                 token     = chunk["message"]["content"]
@@ -303,10 +304,11 @@ async def respond_streaming(user_text: str):
                 buffer   += token
                 print(token, end="", flush=True)
 
-                # Only stream TTS if no tool call is forming
-                if "TOOL:" not in response and not re.search(
-                    r'\b[A-Z_]{3,}\(', response
-                ):
+                # STRATEGIC FIX: If a tool call is starting to form, FREEZE TTS immediately.
+                # This prevents speaking a guess/hallucination while the search is pending.
+                is_tool_prefix = "TOOL:" in response or re.search(r'\b[A-Z_]{3,}\(', response)
+                
+                if not is_tool_prefix:
                     sentences = split_sentences(buffer)
                     if len(sentences) > 1:
                         to_speak = " ".join(sentences[:-1])
@@ -322,11 +324,10 @@ async def respond_streaming(user_text: str):
             tool_name, kwargs  = parse_tool_call(normalized)
 
             if tool_name:
-                # Flush any spoken buffer before executing tool
-                if buffer.strip() and "TOOL:" not in buffer:
-                    path = await generate_tts(buffer.strip())
-                    await tts_queue.put(path)
-                    buffer = ""
+                # DISCARD BUFFER: If we called a tool, what's in the buffer is likely 
+                # a hallucination or an acknowledgment that we don't need to speak yet.
+                buffer = ""
+
 
                 print(f"  🔧 Tool: {tool_name}({kwargs})")
                 tool_result = execute_tool(tool_name, kwargs or {})
